@@ -1,0 +1,14 @@
+{
+    "dockerfile_lines": [],
+    "graphs": {
+        "chatbot": "./src/agents/library/chatbot.py:chatbot",
+        "chat_assistant": "./src/agents/library/chat_assistant.py:chat_assistant",
+        "data_analyst": "./src/agents/library/data_analyst.py:data_analyst",
+        "rag_agent": "./src/agents/library/rag_agent.py:rag_agent"
+    },
+    "env": ".env",
+    "python_version": "3.12",
+    "dependencies": [
+        "."
+    ]
+}
