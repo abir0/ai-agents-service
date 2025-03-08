@@ -8,7 +8,7 @@ from agents.library.rag_agent import rag_agent
 from agents.library.data_analyst import data_analyst
 from schema import AgentInfo
 
-DEFAULT_AGENT = "chat-assistant"
+DEFAULT_AGENT = "data-analyst"
 
 
 @dataclass
