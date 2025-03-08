@@ -180,10 +180,10 @@ class PostgresDBSearchInput(BaseModel):
         "'SELECT * FROM table_name WHERE category = :category' "
         "for parameterized queries",
     )
-    table_name: str = Field(
-        ...,
-        description="Name of the PostgreSQL table to query",
-    )
+    # table_name: str = Field(
+    #     ...,
+    #     description="Name of the PostgreSQL table to query",
+    # )
     parameters: Optional[dict] = Field(
         None,
         description="Optional parameters for parameterized queries as a dictionary. "
@@ -196,9 +196,9 @@ class PostgresDBSearchOutput(BaseModel):
     """Schema for PostgreSQL search results."""
 
     snippet: Optional[Any] = Field(..., description="A partial snippet of the data.")
-    db_schema: Optional[dict] = Field(
-        ..., description="Schema of the output in standard format."
-    )
+    # db_schema: Optional[dict] = Field(
+    #     ..., description="Schema of the output in standard format."
+    # )
     count: int = Field(..., description="Number of documents found")
     status: str = Field(..., description="Status of the search operation")
     file: Optional[str] = Field(..., description="Path of the file containing output.")

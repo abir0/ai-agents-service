@@ -80,7 +80,6 @@ def generate_schema(data: List[dict]) -> dict:
 @tool(args_schema=PostgresDBSearchInput)
 def postgres_db_search(
     query: str,
-    table_name: str = "",
     parameters: Optional[List[dict]] = None,
 ) -> PostgresDBSearchOutput:
     """
@@ -135,10 +134,10 @@ def postgres_db_search(
             json.dump(results, f, indent=4)
 
         snippet = json_snippet(results) if results else ""
-        schema = generate_schema(results)
+        # schema = generate_schema(results)
         return PostgresDBSearchOutput(
             snippet=snippet,
-            db_schema=schema,
+            # db_schema=schema,
             file=filename,
             count=len(results),
             status="success",

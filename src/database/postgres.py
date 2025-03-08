@@ -217,24 +217,24 @@ class AsyncPostgresManager:
             await session.commit()
 
     async def query_data(
-        self, query: str, parameters: List[Any] = None
+        self, query: str, parameters: List[dict] = None
     ) -> List[dict]:
         """
         Query data using SQL expressions.
 
         Args:
             query: The SQL query string
-            parameters: Optional parameters for the query as a list of values
+            parameters: Optional parameters for the query as a list of dictionaries
 
         Returns:
             A list of data entries matching the query
         """
         async with self.async_session() as session:
-            # Convert list of parameters to dictionary if provided
-            params = {}
-            if parameters:
-                for i, param in enumerate(parameters):
-                    params[f"param_{i}"] = param
-
-            result = await session.execute(text(query), params)
-            return [dict(row) for row in result]
+            # Execute the query directly if no parameters
+            if not parameters:
+                result = await session.execute(text(query))
+            else:
+                # Execute with parameters if provided
+                result = await session.execute(text(query), parameters[0])
+            
+            return [dict(row._mapping) for row in result]

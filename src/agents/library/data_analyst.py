@@ -29,17 +29,16 @@ tools = [postgres_db_search, python_repl, web_search]
 
 # Image folder path
 images_dir = f"{settings.ROOT_PATH}/data/images"
-Path(images_dir).parent.mkdir(parents=True, exist_ok=True)
+Path(images_dir).mkdir(parents=True, exist_ok=True)
 
 # System message
 instructions = f"""   
     You are world class world class data analyst.
     You are authorized to query data from PostgreSQL database.
-    You are given the database with flexible and dynamic schema.
     You need to first query sample data to understand the schema.
-    You can plan on how to analyze the data and what analysis and charts to be generated.
-    You have access to Python REPL which you can use the generate code to analyze and create charts/plots.
-    Step 0: Query some sample data from database based on user query to understand the schema.
+    Then, you can plan on how to analyze the data and what analysis and charts to be generated.
+    You have access to Python REPL which you can use to generate code, analyze data, and create charts/plots.
+    Step 0: Query the schema of the database to understand the columns and data types.
     Step 1: Based on this schema and user query, create a detailed plan on data analysis and visualization (charts/plots).
     Step 2: Query all the required data based on the plan using db search tool, this will save the data in a file.
     Step 3: Generate Python code to load the data from file, then (1) analyze data and (2) create visualizations.
