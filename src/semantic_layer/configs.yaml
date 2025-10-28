@@ -1,0 +1,86 @@
+apps:
+  arrow:
+    name: BI Arrow App
+    default_table: ffma_db.GPBI_ERS_STS_ROW_HISTORY_ALL
+    tables:
+      - ffma_db.GPBI_ERS_STS_ROW_HISTORY_ALL
+      - ffma_db.GPBI_SE_DAILY_KPI_ARROW
+      - ffma_db.GPBI_REVENUE_KPI_ARROW
+    meta_table: ffma_db.metadata_sql_question
+    db_config:
+      autocommit: true
+
+tables:
+  ffma_db.GPBI_ERS_STS_ROW_HISTORY_ALL:
+    description: Hourly packs or deno related ERS STS data up to SE level
+    engine: mysql
+    kpis:
+      - ERS_STS
+    constraints:
+      - filter_unknown
+      - filter_national
+
+  ffma_db.GPBI_SE_DAILY_KPI_ARROW:
+    description: Daily SE KPIs for Arrow
+    engine: mysql
+    kpis:
+      - GA
+      - STR
+  
+  ffma_db.GPBI_REVENUE_KPI_ARROW:
+    description: Daily Revenue KPIs for Arrow
+    engine: mysql
+    kpis:
+      - DSTR
+
+kpis:
+  ERS_STS:
+    full_name: ERS Sales to Subscriber
+    keywords:
+      - ERS_STS
+      - STS
+
+  GA:
+    full_name: Gross Add
+    keywords:
+      - GA
+      - Gross Add
+  
+  DSTR:
+    full_name: Daily Subscription and Traffic Revenue
+    keywords:
+      - DSTR
+      - Revenue
+      - Rev
+      - ARPU
+      - Minute
+      - Minutes
+      - MOU
+      - Usage
+  
+  STR:
+    full_name: Sales to Retailer
+    keywords:
+      - STR
+
+constraints:
+  filter_unknown:
+    description: Filter to exclude unknown values
+    sql: >
+      NOT (
+        CIRCLE_NAME = 'UNKNOWN' OR
+        REGION_NAME = 'UNKNOWN' OR
+        AREA_NAME = 'UNKNOWN' OR
+        TERRITORY_NAME = 'UNKNOWN' OR
+        SE_CD = 'UNKNOWN'
+      )
+
+  filter_national:
+    description: Filter to exclude national values
+    sql: >
+      NOT (
+        CIRCLE_NAME = 'NATIONAL' OR
+        REGION_NAME = 'NATIONAL' OR
+        AREA_NAME = 'NATIONAL' OR
+        TERRITORY_NAME = 'NATIONAL'
+      )
