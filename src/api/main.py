@@ -9,7 +9,7 @@ from langchain_core._api import LangChainBetaWarning
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from agents import DEFAULT_AGENT, get_agent, get_all_agent_info
-from api.endpoints import agent, vector_db
+from api.endpoints import agent
 from schema import ServiceMetadata
 from settings import settings
 
@@ -81,4 +81,3 @@ async def info() -> ServiceMetadata:
 
 # Register API endpoints
 app.include_router(agent.router)
-app.include_router(vector_db.router)

@@ -1,4 +1,4 @@
-from typing import Any, Literal, NotRequired, Optional
+from typing import Any, Literal, NotRequired, Optional, Union
 
 from pydantic import BaseModel, Field, SerializeAsAny
 from typing_extensions import TypedDict
@@ -202,3 +202,65 @@ class PostgresDBSearchOutput(BaseModel):
     count: int = Field(..., description="Number of documents found")
     status: str = Field(..., description="Status of the search operation")
     file: Optional[str] = Field(..., description="Path of the file containing output.")
+
+
+class DBSQLExecuteInput(BaseModel):
+    """Schema for SQL execution input parameters."""
+
+    query: str = Field(
+        ...,
+        description="Raw SQL query to execute against the database",
+        examples=["SELECT * FROM users WHERE status = 'active'"],
+    )
+    app: str = Field(
+        default="arrow",
+        description="Application name for database context",
+        examples=["arrow", "biarrow"],
+    )
+
+
+class DBSQLExecuteOutput(BaseModel):
+    """Schema for SQL execution results."""
+
+    query: str = Field(..., description="The SQL query that was executed")
+    status: str = Field(..., description="Status of the query execution")
+    message: Optional[str] = Field(None, description="Additional message or error details")
+    data: Optional[Union[dict, str]] = Field(None, description="Query result data")
+    data_path: Optional[str] = Field(
+        None,
+        description="Path to the file where the result data is stored",
+    )
+    row_count: int = Field(..., description="Number of rows returned")
+    is_error: bool = Field(..., description="Whether an error occurred during execution")
+
+
+class VectorDBSearchInput(BaseModel):
+    """Schema for vector database search input parameters."""
+
+    query: str = Field(
+        ...,
+        description="Search query text to find semantically similar items",
+        examples=["What is the average sales revenue?"],
+    )
+    collection_name: str = Field(
+        default="biarrow_sample_questions",
+        description="Name of the vector database collection to search",
+        examples=["biarrow_sample_questions", "documents", "faqs"],
+    )
+    top_k: int = Field(
+        default=3,
+        ge=1,
+        le=100,
+        description="Number of top similar results to return",
+        examples=[3, 5, 10],
+    )
+
+
+class VectorDBSearchOutput(BaseModel):
+    """Schema for vector database search results."""
+
+    query: str = Field(..., description="The search query that was executed")
+    collection_name: str = Field(..., description="The collection that was searched")
+    results: list[dict] = Field(..., description="List of similar items found")
+    result_count: int = Field(..., description="Number of results returned")
+    status: str = Field(..., description="Status of the search operation")

@@ -1,9 +1,6 @@
 from schema.models import (
     AllModelEnum,
     FakeModelName,
-    GroqModelName,
-    HuggingFaceModelName,
-    OllamaModelName,
     OpenAIModelName,
     Provider,
 )
@@ -19,14 +16,15 @@ from schema.schema import (
     UserInput,
     PostgresDBSearchInput,
     PostgresDBSearchOutput,
+    DBSQLExecuteInput,
+    DBSQLExecuteOutput,
+    VectorDBSearchInput,
+    VectorDBSearchOutput,
 )
 
 __all__ = [
     "AllModelEnum",
     "FakeModelName",
-    "GroqModelName",
-    "HuggingFaceModelName",
-    "OllamaModelName",
     "OpenAIModelName",
     "Provider",
     "AgentInfo",
@@ -40,4 +38,8 @@ __all__ = [
     "ChatHistory",
     "PostgresDBSearchInput",
     "PostgresDBSearchOutput",
+    "DBSQLExecuteInput",
+    "DBSQLExecuteOutput",
+    "VectorDBSearchInput",
+    "VectorDBSearchOutput",
 ]
