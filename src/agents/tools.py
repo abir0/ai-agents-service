@@ -1,53 +1,25 @@
 import asyncio
 import json
-import math
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, List, Optional
 
-import numexpr
+import requests
 from genson import SchemaBuilder
-from langchain.tools.retriever import create_retriever_tool
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langchain_experimental.utilities import PythonREPL
 
-from agents.rag import FAISSManager
 from database import AsyncPostgresManager
-from schema import PostgresDBSearchInput, PostgresDBSearchOutput
+from semantic_layer import TABLE_SCHEMA_MAP
+from schema import (
+    PostgresDBSearchInput,
+    PostgresDBSearchOutput,
+    DBSQLExecuteOutput,
+    VectorDBSearchInput,
+    VectorDBSearchOutput,
+)
 from settings import settings
-
-
-@tool
-def calculator(expression: str) -> str:
-    """Calculates a math expression using numexpr.
-
-    Useful for when you need to answer questions about math using numexpr.
-    This tool is only for math questions and nothing else. Only input
-    math expressions.
-
-    Args:
-        expression (str): A valid numexpr formatted math expression.
-
-    Returns:
-        str: The result of the math expression.
-    """
-
-    try:
-        local_dict = {"pi": math.pi, "e": math.e}
-        output = str(
-            numexpr.evaluate(
-                expression.strip(),
-                global_dict={},  # restrict access to globals
-                local_dict=local_dict,  # add common mathematical functions
-            )
-        )
-        return re.sub(r"^\[|\]$", "", output)
-    except Exception as e:
-        raise ValueError(
-            f'calculator("{expression}") raised error: {e}.'
-            " Please try again with a valid numerical expression"
-        )
 
 
 def json_snippet(
@@ -149,21 +121,6 @@ def postgres_db_search(
         )
 
 
-# TODO: Convert function using @tool decorator and use search()
-# method of FAISSManager instead of create_retriever_tool function
-# to handle metadata returned by search method
-def get_retriever_tool():
-    vector_db = FAISSManager(index_name="faiss_index")
-    retriever = vector_db.get_retriever()
-    retriever_tool = create_retriever_tool(
-        retriever,
-        "retrieve_docs",
-        "Search and return information from the documents.",
-        response_format="content_and_artifact",
-    )
-    return retriever_tool
-
-
 @tool
 def python_repl(code: Annotated[str, "Python code or filename to read the code from"]):
     """Use this tool to execute python code. Make sure that you input the code correctly.
@@ -177,3 +134,163 @@ def python_repl(code: Annotated[str, "Python code or filename to read the code f
     except BaseException as e:
         return f"Failed to execute. Error: {repr(e)}"
     return f"Executed:\n```python\n{code}\n```\nStdout: {result}"
+
+
+@tool
+def run_sql_query(
+    query: str,
+    app: str,
+    config: RunnableConfig,
+) -> DBSQLExecuteOutput:
+    """Use this tool to execute a SQL query against the database.
+    
+    This tool executes raw SQL queries directly on the configured database.
+    Useful for data retrieval, analysis, and reporting tasks.
+    
+    Args:
+        query (str): Raw SQL query to execute
+        app (str): Application name (default: "arrow")
+        config (RunnableConfig): set by runtime environment to pass thread_id
+
+    Returns:
+        DBSQLExecuteOutput: A structured response containing query results,
+        status, message, and error information.
+    """
+    try:
+        if config:
+            thread_id = config["configurable"].get("thread_id")
+        else:
+            thread_id = None
+        print(thread_id)
+        print(settings.GENBI_API_KEY)
+
+        payload = {
+            "uid": thread_id if thread_id else f"agent_req_{datetime.now().strftime('%Y%m%d%H%M%S%f')}",
+            "app": app if app else "arrow",
+            "sql": query,
+        }
+
+        result = requests.post(
+            f"{settings.GENBI_API_URL}/api/query/execute",
+            json=payload,
+            headers={"Authorization": f"Bearer {settings.GENBI_API_KEY}"},
+        ).json()
+        print(result)
+        
+        if result.get("is_error"):
+            return DBSQLExecuteOutput(
+                query=query,
+                status=result.get("status", "error"),
+                message=result.get("message", "Unknown error"),
+                data=None,
+                data_path=None,
+                row_count=0,
+                is_error=True,
+            )
+        
+        data = result.get("data", [])
+        status = result.get("status", "success")
+        message = result.get("message", "")
+
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+        filename = f"{settings.ROOT_PATH}/data/sql/data_{timestamp}.json"
+        Path(filename).parent.mkdir(parents=True, exist_ok=True)
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+
+        snippet = json_snippet(data) if data else ""
+        
+        return DBSQLExecuteOutput(
+            query=query,
+            status=status,
+            message=message if message else None,
+            data=snippet,
+            data_path=filename,
+            row_count=len(data),
+            is_error=False,
+        )
+    except Exception as e:
+        return DBSQLExecuteOutput(
+            query=query,
+            status="error",
+            message=f"Failed to execute SQL query. Error: {repr(e)}",
+            data=None,
+            data_path=None,
+            row_count=0,
+            is_error=True,
+        )
+
+
+@tool()
+def get_table_schema(
+    table_name: str,
+) -> str:
+    """Use this tool to get the schema of a PostgreSQL table.
+    
+    This tool retrieves the schema of a specified table in the PostgreSQL database.
+    Useful for understanding the structure of the data and available columns.
+    
+    Args:
+        table_name (str): Name of the table to retrieve schema for
+        app (str): Application name (default: "arrow")
+        
+    Returns:
+        str: The schema of the specified table in markdown format.
+    """
+    try:
+        return TABLE_SCHEMA_MAP[table_name]
+    except Exception as e:
+        raise ValueError(f"Failed to retrieve schema for table '{table_name}': {repr(e)}")
+
+
+@tool(args_schema=VectorDBSearchInput)
+def search_similar_queries(
+    query: str,
+    collection_name: str = "biarrow_sample_questions",
+    top_k: int = 3,
+) -> VectorDBSearchOutput:
+    """Use this tool to search for similar queries in the vector database.
+    
+    This tool finds semantically similar items based on the input query using
+    vector similarity search. Useful for finding related questions, similar 
+    documents, or retrieving relevant context.
+    
+    Args:
+        query (str): The search query text
+        collection_name (str): Name of the vector database collection (default: "biarrow_sample_questions")
+        top_k (int): Number of top similar results to return (default: 3)
+        
+    Returns:
+        VectorDBSearchOutput: A structured response containing the query,
+        collection name, results, result count, and status.
+    """
+    try:
+        payload = {
+            "query": query,
+            "collection_name": collection_name,
+            "top_k": top_k,
+        }
+        
+        result = requests.post(
+            f"{settings.GENBI_API_URL}/api/vectordb/search",
+            json=payload,
+            headers={"Authorization": f"Bearer {settings.GENBI_API_KEY}"},
+        ).json()
+        
+        results = result.get("results", [])
+        
+        return VectorDBSearchOutput(
+            query=query,
+            collection_name=collection_name,
+            results=results,
+            result_count=len(results),
+            status="success",
+        )
+    except Exception as e:
+        return VectorDBSearchOutput(
+            query=query,
+            collection_name=collection_name,
+            results=[],
+            result_count=0,
+            status=f"error: {repr(e)}",
+        )

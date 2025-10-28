@@ -1,6 +1,8 @@
+from datetime import datetime
+from functools import partial
 from pathlib import Path
+from typing import NotRequired
 
-from langchain_community.tools import DuckDuckGoSearchResults
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import (
@@ -12,8 +14,10 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from agents.llm import get_model, settings
-from agents.tools import postgres_db_search, python_repl
+from agents.llm import get_model
+from agents.tools import run_sql_query, python_repl, search_similar_queries, get_table_schema
+from semantic_layer import TABLE_SCHEMA_MAP
+from settings import settings
 
 
 class AgentState(MessagesState, total=False):
@@ -21,22 +25,26 @@ class AgentState(MessagesState, total=False):
 
     documentation: https://typing.readthedocs.io/en/latest/spec/typeddict.html#totality
     """
+    thread_id: NotRequired[str]
 
 
 # Add the tools
-web_search = DuckDuckGoSearchResults(name="WebSearch")
-tools = [postgres_db_search, python_repl, web_search]
+tools = [run_sql_query, python_repl, search_similar_queries, get_table_schema]
 
 # Image folder path
 images_dir = f"{settings.ROOT_PATH}/data/images"
 Path(images_dir).mkdir(parents=True, exist_ok=True)
 
+# Available tables
+sources = list(TABLE_SCHEMA_MAP.keys())
+
+# Current time
+current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 # System message
 instructions = f"""   
-    You are world class world class data analyst.
-    You are authorized to query data from PostgreSQL database.
-    You need to first query sample data to understand the schema.
-    Then, you can plan on how to analyze the data and what analysis and charts to be generated.
+    You are a world class SQL expert and data analyst. Your task is to help the user analyze and visualize data from a SQL database.
+    First, based on the user question and your available tools, make a plan on how to analyze the data and what analysis and charts to be generated.
     You have access to Python REPL which you can use to generate code, analyze data, and create charts/plots.
     Step 0: Query the schema of the database to understand the columns and data types.
     Step 1: Based on this schema and user query, create a detailed plan on data analysis and visualization (charts/plots).
@@ -45,21 +53,21 @@ instructions = f"""
     Step 4: Run the code using Python REPL and get the analysis results.
     Step 5: Create a final report on the analysis including the image links (<img> tag) for the visualization or charts.
 
-    NOTE: THE USER CAN'T SEE THE TOOL RESPONSE.
-
-    A few things to remember:
+    IMPORTANT guidelines:
+    - THE USER CAN'T SEE THE TOOL RESPONSE. ONLY SHOW THE FINAL ANALYSIS AND VISUALIZATIONS TO THE USER.
+    - Always think step-by-step and create a detailed plan before generating any code.
     - Generate code always based on the user query, your detailed plan, and the data schema.
-    - Use the provided tools to search/query for data from the databases using SQL-like query, run code to
-    generate charts or graphs or summary statistics, and search web for relevant information if needed.
-    - If Python REPL shows error fix the error in code and run again, if you are failing more than 3 times give up.
+    - Use the provided tools to query the databases using SQL query, run code to generate charts or graphs or summary statistics.
+    - If any tool shows error fix the error in code and run again, if you are failing more than 3 times give up.
     - For data processing and analysis, use pandas library.
     - Use the returned filename from database search tool to load data into pandas.
     - For charts generation, use seaborn or matplotlib.
-    - ALWAYS save the plots/charts into the following folder: {images_dir}
     - Only include markdown-formatted links to citations used in your response. Only include one
     or two citations per response unless more are needed. ONLY USE LINKS RETURNED BY THE TOOLS.
-    - When displaying image to the user, use html <img> tag, instead of markdown.
-    ALWAYS USE IMG TAG FOR LINKING IMAGES.
+    - When displaying image to the user, use html <img> tag, instead of markdown. ALWAYS USE IMG TAG FOR LINKING IMAGES.
+    - The database has the following tables: {', '.join(sources)}
+    - ALWAYS save the plots/charts into the following folder: {images_dir}
+    - Current date and time is: {current_time}
     """
 
 
@@ -73,8 +81,9 @@ def wrap_model(model: BaseChatModel) -> RunnableSerializable[AgentState, AIMessa
 
 
 async def acall_model(state: AgentState, config: RunnableConfig) -> AgentState:
-    m = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
-    model_runnable = wrap_model(m)
+    state["thread_id"] = config["configurable"].get("thread_id")
+    model = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
+    model_runnable = wrap_model(model)
     response = await model_runnable.ainvoke(state, config)
 
     # We return a list, because this will get added to the existing list
