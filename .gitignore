@@ -196,6 +196,5 @@ cython_debug/
 .langgraph_api/
 
 # Media files
-*.png
 *.jpg
 *.gif

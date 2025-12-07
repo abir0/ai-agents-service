@@ -32,8 +32,8 @@ from agents.client import AgentClient, AgentClientError
 from schema.schema import ChatHistory, ChatMessage
 
 # Title and icon for head
-APP_TITLE = "AI Agents Service"
-APP_ICON = "./static/logo.svg"
+APP_TITLE = "GenBI Agent"
+APP_ICON = "./static/logo.png"
 
 
 # Utility functions
@@ -138,7 +138,7 @@ async def main() -> None:
         )
         # Description
         ""
-        "AI agent service built with LangGraph, FastAPI and Streamlit"
+        "Conversational BI Agent"
         with st.popover(":material/settings: Settings", use_container_width=True):
             model_idx = agent_client.info.models.index(agent_client.info.default_model)
             model = st.selectbox(
