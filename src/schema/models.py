@@ -12,6 +12,7 @@ class OpenAIModelName(StrEnum):
 
     GPT_4O_MINI = "gpt-4o-mini"
     GPT_4O = "gpt-4o"
+    GPT_5_1 = "gpt-5.1"
 
 
 class FakeModelName(StrEnum):

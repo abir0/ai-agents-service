@@ -12,6 +12,7 @@ from schema import (
 
 _MODEL_TABLE = {
     FakeModelName.FAKE: "fake",
+    OpenAIModelName.GPT_5_1: "gpt-5.1",
     OpenAIModelName.GPT_4O: "gpt-4o",
     OpenAIModelName.GPT_4O_MINI: "gpt-4o-mini",
 }
