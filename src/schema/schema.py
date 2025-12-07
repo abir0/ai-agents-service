@@ -224,14 +224,18 @@ class DBSQLExecuteOutput(BaseModel):
 
     query: str = Field(..., description="The SQL query that was executed")
     status: str = Field(..., description="Status of the query execution")
-    message: Optional[str] = Field(None, description="Additional message or error details")
+    message: Optional[str] = Field(
+        None, description="Additional message or error details"
+    )
     data: Optional[Union[dict, str]] = Field(None, description="Query result data")
     data_path: Optional[str] = Field(
         None,
         description="Path to the file where the result data is stored",
     )
     row_count: int = Field(..., description="Number of rows returned")
-    is_error: bool = Field(..., description="Whether an error occurred during execution")
+    is_error: bool = Field(
+        ..., description="Whether an error occurred during execution"
+    )
 
 
 class VectorDBSearchInput(BaseModel):
@@ -264,3 +268,39 @@ class VectorDBSearchOutput(BaseModel):
     results: list[dict] = Field(..., description="List of similar items found")
     result_count: int = Field(..., description="Number of results returned")
     status: str = Field(..., description="Status of the search operation")
+
+
+class WeatherTrendOutput(BaseModel):
+    """Schema for weather trend analysis results."""
+
+    location_name: str = Field(..., description="Name of the location")
+    start_date: str = Field(..., description="Start date of the trend analysis")
+    end_date: str = Field(..., description="End date of the trend analysis")
+    summary: str = Field(
+        ..., description="User-friendly text summary of weather trends"
+    )
+    data_path: Optional[str] = Field(
+        None,
+        description="Path to the file where the detailed trend data is stored",
+    )
+    days_analyzed: int = Field(
+        ..., description="Number of days included in the analysis"
+    )
+    status: str = Field(..., description="Status of the operation")
+    is_error: bool = Field(default=False, description="Whether an error occurred")
+
+
+class WeatherForecastOutput(BaseModel):
+    """Schema for weather forecast results."""
+
+    location_name: str = Field(..., description="Name of the location")
+    forecast_days: int = Field(..., description="Number of days in the forecast")
+    summary: str = Field(
+        ..., description="User-friendly text summary of weather forecast"
+    )
+    data_path: Optional[str] = Field(
+        None,
+        description="Path to the file where the detailed forecast data is stored",
+    )
+    status: str = Field(..., description="Status of the operation")
+    is_error: bool = Field(default=False, description="Whether an error occurred")
