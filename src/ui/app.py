@@ -18,6 +18,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 
 import asyncio
 import base64
+import json
 import os
 import re
 import urllib.parse
@@ -306,17 +307,41 @@ async def draw_messages(
                                 replace_img_tag(msg.content), unsafe_allow_html=True
                             )
 
+                    # Render Plotly chart if plotly_data is present
+                    if msg.plotly_data:
+                        try:
+                            import plotly.graph_objects as go
+
+                            # Convert the plotly_data dict back to a Plotly figure
+                            fig = go.Figure(msg.plotly_data)
+
+                            # Display the chart with appropriate sizing
+                            st.plotly_chart(
+                                fig,
+                                use_container_width=True,
+                                theme="streamlit",
+                                key=f"plotly_{msg.run_id}_{id(msg)}",
+                            )
+                        except ImportError:
+                            st.error(
+                                "Plotly is not installed. Please install it with: pip install plotly"
+                            )
+                        except Exception as e:
+                            st.error(f"Error rendering Plotly chart: {repr(e)}")
+
                     if msg.tool_calls:
                         # Create a status container for each tool call and store the
                         # status container by ID to ensure results are mapped to the
                         # correct status container
                         call_results = {}
+                        tool_names = {}
                         for tool_call in msg.tool_calls:
                             status = st.status(
                                 f"""Tool Call: {tool_call["name"]}""",
                                 state="running" if is_new else "complete",
                             )
                             call_results[tool_call["id"]] = status
+                            tool_names[tool_call["id"]] = tool_call["name"]
                             status.write("Input:")
                             status.write(tool_call["args"])
 
@@ -333,9 +358,94 @@ async def draw_messages(
                             if is_new:
                                 st.session_state.messages.append(tool_result)
                             status = call_results[tool_result.tool_call_id]
-                            status.write("Output:")
-                            status.write(tool_result.content)
-                            status.update(state="complete")
+                            tool_name = tool_names.get(tool_result.tool_call_id, "")
+
+                            # Check if this is a Plotly chart generation tool
+                            if tool_name == "generate_plotly_chart":
+                                try:
+                                    import plotly.graph_objects as go
+
+                                    # Parse the tool result content as JSON
+                                    chart_data = json.loads(tool_result.content)
+
+                                    if not chart_data.get(
+                                        "is_error"
+                                    ) and chart_data.get("plotly_json"):
+                                        # Display chart info in status
+                                        status.write("Output:")
+                                        status.write(
+                                            f"**{chart_data.get('title', 'Chart')}**"
+                                        )
+                                        status.write(chart_data.get("description", ""))
+                                        status.update(state="complete")
+
+                                        # Render the Plotly chart outside the status widget
+                                        fig = go.Figure(chart_data["plotly_json"])
+                                        st.plotly_chart(
+                                            fig,
+                                            use_container_width=True,
+                                            theme="streamlit",
+                                            key=f"plotly_tool_{tool_result.tool_call_id}",
+                                        )
+                                    else:
+                                        # Show error in status
+                                        status.write("Output:")
+                                        status.write(tool_result.content)
+                                        status.update(state="complete")
+
+                                except (json.JSONDecodeError, ImportError, KeyError):
+                                    # Fall back to regular output display
+                                    status.write("Output:")
+                                    status.write(tool_result.content)
+                                    status.update(state="complete")
+
+                            # Check if this is a GeoJSON map visualization tool
+                            elif tool_name == "visualize_geojson_map":
+                                try:
+                                    import plotly.graph_objects as go
+
+                                    # Parse the tool result content as JSON
+                                    map_data = json.loads(tool_result.content)
+
+                                    if not map_data.get("is_error") and map_data.get(
+                                        "plotly_json"
+                                    ):
+                                        # Display map info in status
+                                        status.write("Output:")
+                                        status.write(
+                                            f"**{map_data.get('title', 'Map')}**"
+                                        )
+                                        status.write(map_data.get("description", ""))
+                                        if map_data.get("feature_count"):
+                                            status.write(
+                                                f"Features displayed: {map_data['feature_count']}"
+                                            )
+                                        status.update(state="complete")
+
+                                        # Render the Plotly map outside the status widget
+                                        fig = go.Figure(map_data["plotly_json"])
+                                        st.plotly_chart(
+                                            fig,
+                                            use_container_width=True,
+                                            theme="streamlit",
+                                            key=f"plotly_map_{tool_result.tool_call_id}",
+                                        )
+                                    else:
+                                        # Show error in status
+                                        status.write("Output:")
+                                        status.write(tool_result.content)
+                                        status.update(state="complete")
+
+                                except (json.JSONDecodeError, ImportError, KeyError):
+                                    # Fall back to regular output display
+                                    status.write("Output:")
+                                    status.write(tool_result.content)
+                                    status.update(state="complete")
+                            else:
+                                # Regular tool output
+                                status.write("Output:")
+                                status.write(tool_result.content)
+                                status.update(state="complete")
 
             # For unexpected message types, log an error and stop
             case _:

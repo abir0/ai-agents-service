@@ -116,6 +116,10 @@ class ChatMessage(BaseModel):
         description="Custom message data.",
         default={},
     )
+    plotly_data: dict[str, Any] | None = Field(
+        description="Plotly figure data for chart visualization.",
+        default=None,
+    )
 
     def pretty_repr(self) -> str:
         """Get a pretty representation of the message."""
@@ -301,6 +305,25 @@ class WeatherForecastOutput(BaseModel):
     data_path: Optional[str] = Field(
         None,
         description="Path to the file where the detailed forecast data is stored",
+    )
+    status: str = Field(..., description="Status of the operation")
+    is_error: bool = Field(default=False, description="Whether an error occurred")
+
+
+class PlotlyChartOutput(BaseModel):
+    """Schema for Plotly chart generation results."""
+
+    chart_type: str = Field(
+        ..., description="Type of chart (e.g., 'line', 'bar', 'scatter', 'pie')"
+    )
+    title: str = Field(..., description="Title of the chart")
+    description: str = Field(..., description="Description of what the chart shows")
+    plotly_json: dict[str, Any] = Field(
+        ..., description="Plotly figure as JSON-serializable dictionary"
+    )
+    data_path: Optional[str] = Field(
+        None,
+        description="Path to the file where the source data is stored",
     )
     status: str = Field(..., description="Status of the operation")
     is_error: bool = Field(default=False, description="Whether an error occurred")

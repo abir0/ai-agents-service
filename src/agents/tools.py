@@ -14,6 +14,7 @@ from langchain_experimental.utilities import PythonREPL
 from database import AsyncPostgresManager
 from schema import (
     DBSQLExecuteOutput,
+    PlotlyChartOutput,
     PostgresDBSearchInput,
     PostgresDBSearchOutput,
     VectorDBSearchInput,
@@ -44,6 +45,30 @@ def json_snippet(
             return json.dumps(data, indent=2)
         json_str = json.dumps(data[:5], indent=2)
         return json_str[:max_length] + ("..." if len(json_str) > max_length else "")
+
+
+def convert_numpy_to_list(obj):
+    """
+    Recursively convert numpy arrays to lists in nested dictionaries and lists.
+
+    Args:
+        obj: Object that may contain numpy arrays
+
+    Returns:
+        Object with all numpy arrays converted to lists
+    """
+    import numpy as np
+
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_to_list(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_to_list(item) for item in obj]
+    elif isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+    else:
+        return obj
 
 
 def generate_schema(data: List[dict]) -> dict:
@@ -995,3 +1020,561 @@ def get_weather_forecast(
             status="error",
             is_error=True,
         )
+
+
+@tool
+def visualize_geojson_map(
+    location_type: str,
+    location_names: Optional[List[str]] = None,
+    output_filename: Optional[str] = None,
+    center_lat: Optional[float] = None,
+    center_lng: Optional[float] = None,
+    zoom_start: int = 7,
+) -> str:
+    """Use this tool to load and visualize GeoJSON boundary data on an interactive map.
+
+    This tool loads location hierarchy boundaries (Circle, Region, Cluster, or Territory)
+    from GeoJSON files and creates an interactive Plotly map visualization with hover tooltips
+    showing location details. You can optionally filter to show only specific boundaries.
+
+    Args:
+        location_type (str): Type of location boundaries to visualize.
+                           Options: "circle", "region", "cluster", "territory"
+        location_names (Optional[List[str]]): List of specific location names to display.
+                                             If None, displays all boundaries.
+                                             Names are matched case-insensitively against GeoJSON properties.
+        output_filename (Optional[str]): Custom name for the output HTML map file (without extension).
+                                        If not provided, auto-generates based on location type and timestamp.
+        center_lat (Optional[float]): Latitude for map center. If None, auto-calculates from boundaries.
+        center_lng (Optional[float]): Longitude for map center. If None, auto-calculates from boundaries.
+        zoom_start (int): Initial zoom level (default: 7)
+
+    Returns:
+        str: JSON string containing the Plotly figure for rendering in the UI.
+    """
+    try:
+        # Import plotly here to avoid loading it unless needed
+        import plotly.graph_objects as go
+
+        # Normalize location_type
+        location_type_lower = location_type.lower()
+        valid_types = ["circle", "region", "cluster", "territory"]
+
+        if location_type_lower not in valid_types:
+            return json.dumps(
+                {
+                    "error": f"Invalid location_type '{location_type}'. Must be one of: {', '.join(valid_types)}",
+                    "status": "error",
+                }
+            )
+
+        # Map location types to GeoJSON files
+        geojson_files = {
+            "circle": f"{settings.ROOT_PATH}/data/Circle_watermarked.geojson",
+            "region": f"{settings.ROOT_PATH}/data/Region_watermarked.geojson",
+            "cluster": f"{settings.ROOT_PATH}/data/Cluster_watermarked.geojson",
+            "territory": f"{settings.ROOT_PATH}/data/Territory_watermarked 1.geojson",
+        }
+
+        geojson_path = geojson_files[location_type_lower]
+
+        # Check if file exists
+        if not Path(geojson_path).exists():
+            return json.dumps(
+                {"error": f"GeoJSON file not found: {geojson_path}", "status": "error"}
+            )
+
+        # Load GeoJSON data
+        with open(geojson_path, "r", encoding="utf-8") as f:
+            geojson_data = json.load(f)
+
+        # Extract features
+        all_features = geojson_data.get("features", [])
+        if not all_features:
+            return json.dumps(
+                {"error": "No features found in GeoJSON file", "status": "error"}
+            )
+
+        # Filter features if location_names provided
+        if location_names:
+            # Normalize location names for case-insensitive matching
+            location_names_lower = [name.lower() for name in location_names]
+            filtered_features = []
+
+            for feature in all_features:
+                properties = feature.get("properties", {})
+                # Check all property values for matches
+                for prop_value in properties.values():
+                    if (
+                        isinstance(prop_value, str)
+                        and prop_value.lower() in location_names_lower
+                    ):
+                        filtered_features.append(feature)
+                        break
+
+            if not filtered_features:
+                return json.dumps(
+                    {
+                        "error": f"No boundaries found matching: {', '.join(location_names)}",
+                        "status": "error",
+                        "available_locations": [
+                            feature.get("properties", {}).get("name", "Unknown")
+                            for feature in all_features[
+                                :10
+                            ]  # Show first 10 as examples
+                        ],
+                    }
+                )
+
+            features = filtered_features
+        else:
+            features = all_features
+
+        # Prepare hover text and IDs for each feature FIRST
+        hover_texts = []
+        feature_ids = []
+
+        for idx, feature in enumerate(features):
+            properties = feature.get("properties", {})
+            hover_text = f"<b>{location_type.title()}</b><br>"
+            for key, value in properties.items():
+                if key != "_index":  # Skip internal index property
+                    hover_text += f"{key}: {value}<br>"
+            hover_texts.append(hover_text.rstrip("<br>"))
+
+            # Add index-based ID to feature properties for mapping
+            if "properties" not in feature:
+                feature["properties"] = {}
+            feature["properties"]["_index"] = idx
+            feature_ids.append(idx)
+
+        # Update geojson_data with features (now with _index properties)
+        geojson_data = {"type": "FeatureCollection", "features": features}
+
+        # Calculate center point from features if not provided
+        if center_lat is None or center_lng is None:
+            all_coords = []
+            for feature in features:
+                geometry = feature.get("geometry", {})
+                if geometry.get("type") == "Polygon":
+                    coords = geometry.get("coordinates", [[]])[0]
+                    all_coords.extend(coords)
+                elif geometry.get("type") == "MultiPolygon":
+                    for polygon in geometry.get("coordinates", []):
+                        coords = polygon[0] if polygon else []
+                        all_coords.extend(coords)
+
+            if all_coords:
+                lats = [coord[1] for coord in all_coords]
+                lngs = [coord[0] for coord in all_coords]
+                calc_center_lat = sum(lats) / len(lats)
+                calc_center_lng = sum(lngs) / len(lngs)
+                center_lat = calc_center_lat if center_lat is None else center_lat
+                center_lng = calc_center_lng if center_lng is None else center_lng
+
+                # Auto-adjust zoom based on feature bounds
+                if len(features) < len(all_features):
+                    lat_range = max(lats) - min(lats)
+                    lng_range = max(lngs) - min(lngs)
+                    max_range = max(lat_range, lng_range)
+                    # Adjust zoom: smaller range = higher zoom
+                    if max_range < 0.5:
+                        zoom_start = max(zoom_start, 10)
+                    elif max_range < 1.0:
+                        zoom_start = max(zoom_start, 9)
+                    elif max_range < 2.0:
+                        zoom_start = max(zoom_start, 8)
+            else:
+                # Default to Bangladesh center
+                center_lat = 23.8103 if center_lat is None else center_lat
+                center_lng = 90.4125 if center_lng is None else center_lng
+        else:
+            # Use provided values
+            if center_lat is None:
+                center_lat = 23.8103
+            if center_lng is None:
+                center_lng = 90.4125
+
+        # Create the Plotly choropleth map
+        fig = go.Figure(
+            go.Choroplethmapbox(
+                geojson=geojson_data,
+                locations=feature_ids,
+                z=list(range(len(features))),  # Different values for each feature
+                featureidkey="properties._index",
+                text=hover_texts,
+                hovertemplate="%{text}<extra></extra>",
+                colorscale=[[0, "lightblue"], [1, "blue"]],
+                showscale=False,
+                marker=dict(opacity=0.6, line=dict(color="darkblue", width=2)),
+            )
+        )
+
+        # Update map layout
+        map_title = f"{location_type.title()} Boundaries Map"
+
+        fig.update_layout(
+            mapbox=dict(
+                style="open-street-map",
+                center=dict(lat=center_lat, lon=center_lng),
+                zoom=zoom_start,
+            ),
+            title=dict(text=map_title, x=0.5, xanchor="center"),
+            margin=dict(l=0, r=0, t=40, b=0),
+            height=600,
+            hovermode="closest",
+        )
+
+        # Convert to dict and handle numpy arrays
+        plotly_json = fig.to_dict()
+        plotly_json = convert_numpy_to_list(plotly_json)
+
+        # Save the figure data
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        if not output_filename:
+            output_filename = f"{location_type_lower}_map_{timestamp}"
+
+        output_dir = f"{settings.ROOT_PATH}/data/images"
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        output_path = f"{output_dir}/{output_filename}.json"
+
+        # Save as JSON
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(plotly_json, f, indent=2)
+
+        # Build description
+        description = f"Interactive map showing {len(features)} {location_type} "
+        if location_names:
+            if len(features) == 1:
+                description += f"boundary: {location_names[0]}"
+            else:
+                description += f"boundaries (filtered from {len(all_features)} total)"
+        else:
+            description += "boundaries"
+
+        # Return the result as JSON string
+        result = {
+            "chart_type": "geojson_map",
+            "title": map_title,
+            "description": description,
+            "plotly_json": plotly_json,
+            "data_path": output_path,
+            "feature_count": len(features),
+            "total_features": len(all_features),
+            "filtered": location_names is not None,
+            "status": "success",
+            "is_error": False,
+        }
+
+        return json.dumps(result)
+
+    except ImportError:
+        return json.dumps(
+            {
+                "error": "Plotly library is not installed. Please install it with: pip install plotly",
+                "status": "error",
+            }
+        )
+    except json.JSONDecodeError as e:
+        return json.dumps(
+            {
+                "error": f"Failed to parse GeoJSON file. Error: {repr(e)}",
+                "status": "error",
+            }
+        )
+    except Exception as e:
+        return json.dumps(
+            {
+                "error": f"Failed to create map visualization. Error: {repr(e)}",
+                "status": "error",
+            }
+        )
+
+
+@tool
+def generate_plotly_chart(
+    data_path: str,
+    custom_code: Optional[str] = None,
+    chart_type: Optional[str] = "line",
+    x_column: Optional[str] = None,
+    y_columns: Optional[List[str]] = None,
+    title: Optional[str] = None,
+) -> str:
+    """Use this tool to generate interactive Plotly charts from JSON data files.
+
+    This tool loads data from a JSON file (typically generated by run_sql_query tool)
+    and creates an interactive Plotly visualization. The chart is returned as JSON
+    that can be rendered in the UI.
+
+    Useful for creating data visualizations such as:
+    - Line charts for trends over time
+    - Bar charts for comparisons
+    - Scatter plots for correlations
+    - Pie charts for proportions
+    - Area charts for cumulative data
+    - Dual-axis charts
+    - Custom Plotly visualizations
+
+    Args:
+        data_path (str): Path to JSON file containing the data to visualize
+        chart_type (str): Type of chart to generate. Options: "line", "bar", "scatter",
+                         "pie", "area", "histogram", "box", "heatmap", "custom" (default: "line")
+        x_column (Optional[str]): Column name to use for x-axis. If None, uses first column.
+        y_columns (Optional[List[str]]): Column names to use for y-axis. If None, uses all columns except x.
+        title (Optional[str]): Custom title for the chart. If None, generates a default title.
+        custom_code (Optional[str]): Custom Plotly code to execute. If provided and chart_type="custom",
+                                     this code will be executed with 'data' and 'df' variables available.
+                                     The code must create a 'fig' variable containing the Plotly figure.
+                                     Example:
+                                     ```
+                                     import plotly.graph_objects as go
+                                     from plotly.subplots import make_subplots
+                                     
+                                     fig = make_subplots(specs=[[{"secondary_y": True}]])
+                                     fig.add_trace(go.Scatter(x=df['DAY_KEY'], y=df['TOTAL_HITS'], name='Hits'), secondary_y=False)
+                                     fig.add_trace(go.Scatter(x=df['DAY_KEY'], y=df['TOTAL_AMT'], name='Amount'), secondary_y=True)
+                                     fig.update_layout(title='Dual Axis Chart')
+                                     ```
+
+    Returns:
+        str: JSON string containing the Plotly figure and chart metadata.
+    """
+    try:
+        # Import plotly here to avoid loading it unless needed
+        import pandas as pd
+        import plotly.express as px
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+
+        # Load data from JSON file
+        if not Path(data_path).exists():
+            result = PlotlyChartOutput(
+                chart_type=chart_type,
+                title="File Not Found",
+                description=f"Data file not found: {data_path}",
+                plotly_json={},
+                data_path=data_path,
+                status="error",
+                is_error=True,
+            )
+            return result.model_dump_json()
+
+        with open(data_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if not data:
+            result = PlotlyChartOutput(
+                chart_type=chart_type,
+                title="No Data",
+                description="Data file contains no data to visualize",
+                plotly_json={},
+                data_path=data_path,
+                status="error",
+                is_error=True,
+            )
+            return result.model_dump_json()
+
+        # Convert to pandas DataFrame for easier manipulation
+        df = pd.DataFrame(data)
+
+        # Detect appropriate columns for x and y axes
+        columns = df.columns.tolist()
+
+        # Use provided columns or intelligently select defaults
+        if x_column and x_column in columns:
+            x_col = x_column
+        else:
+            x_col = columns[0] if len(columns) > 0 else None
+
+        if y_columns:
+            y_cols = [col for col in y_columns if col in columns]
+        else:
+            y_cols = [col for col in columns if col != x_col]
+
+        # Generate the chart based on chart_type
+        fig = None
+        chart_title = title if title else f"{chart_type.title()} Chart"
+        chart_description = (
+            f"Visualization of data from {Path(data_path).name} as {chart_type} chart"
+        )
+
+        try:
+            # Handle custom Plotly code
+            if chart_type == "custom" and custom_code:
+                try:
+                    # Create a namespace with necessary imports and data
+                    namespace = {
+                        'data': data,
+                        'df': df,
+                        'pd': pd,
+                        'px': px,
+                        'go': go,
+                        'make_subplots': make_subplots,
+                    }
+                    
+                    # Execute the custom code
+                    exec(custom_code, namespace)
+                    
+                    # Get the figure from the namespace
+                    if 'fig' not in namespace:
+                        return PlotlyChartOutput(
+                            chart_type=chart_type,
+                            title="Custom Code Error",
+                            description="Custom code must create a 'fig' variable containing the Plotly figure",
+                            plotly_json={},
+                            data_path=data_path,
+                            status="error",
+                            is_error=True,
+                        ).model_dump_json()
+                    
+                    fig = namespace['fig']
+                    chart_description = "Custom Plotly visualization"
+                    
+                except Exception as custom_error:
+                    return PlotlyChartOutput(
+                        chart_type=chart_type,
+                        title="Custom Code Execution Error",
+                        description=f"Error executing custom code: {repr(custom_error)}",
+                        plotly_json={},
+                        data_path=data_path,
+                        status="error",
+                        is_error=True,
+                    ).model_dump_json()
+            
+            elif chart_type == "line":
+                if len(y_cols) == 1:
+                    fig = px.line(df, x=x_col, y=y_cols[0], title=chart_title)
+                else:
+                    fig = px.line(df, x=x_col, y=y_cols, title=chart_title)
+                chart_description = f"Line chart showing trends for {', '.join(y_cols)}"
+
+            elif chart_type == "bar":
+                if len(y_cols) == 1:
+                    fig = px.bar(df, x=x_col, y=y_cols[0], title=chart_title)
+                else:
+                    fig = px.bar(df, x=x_col, y=y_cols, title=chart_title)
+                chart_description = f"Bar chart comparing {', '.join(y_cols)}"
+
+            elif chart_type == "scatter":
+                y_col = y_cols[0] if len(y_cols) > 0 else None
+                fig = px.scatter(df, x=x_col, y=y_col, title=chart_title)
+                chart_description = f"Scatter plot of {x_col} vs {y_col}"
+
+            elif chart_type == "pie":
+                # Pie charts need values and labels
+                values_col = y_cols[0] if len(y_cols) > 0 else None
+                fig = px.pie(df, values=values_col, names=x_col, title=chart_title)
+                chart_description = f"Pie chart showing distribution of {values_col}"
+
+            elif chart_type == "area":
+                if len(y_cols) == 1:
+                    fig = px.area(df, x=x_col, y=y_cols[0], title=chart_title)
+                else:
+                    fig = px.area(df, x=x_col, y=y_cols, title=chart_title)
+                chart_description = f"Area chart showing cumulative {', '.join(y_cols)}"
+
+            elif chart_type == "histogram":
+                col_to_plot = x_col if len(y_cols) == 0 else y_cols[0]
+                fig = px.histogram(df, x=col_to_plot, title=chart_title)
+                chart_description = f"Histogram showing distribution of {col_to_plot}"
+
+            elif chart_type == "box":
+                y_col = y_cols[0] if len(y_cols) > 0 else None
+                fig = px.box(df, x=x_col, y=y_col, title=chart_title)
+                chart_description = f"Box plot showing distribution of {y_col}"
+
+            elif chart_type == "heatmap":
+                # Create a pivot table for heatmap if possible
+                if len(columns) >= 3:
+                    pivot_df = df.pivot_table(
+                        index=columns[0],
+                        columns=columns[1],
+                        values=columns[2],
+                        aggfunc="mean",
+                    )
+                    fig = px.imshow(pivot_df, title=chart_title, aspect="auto")
+                    chart_description = (
+                        f"Heatmap of {columns[2]} across {columns[0]} and {columns[1]}"
+                    )
+                else:
+                    # Fall back to correlation heatmap
+                    corr_matrix = df.select_dtypes(include=["number"]).corr()
+                    fig = px.imshow(
+                        corr_matrix, title="Correlation Heatmap", aspect="auto"
+                    )
+                    chart_description = "Correlation heatmap of numeric columns"
+            else:
+                # Default to line chart
+                fig = px.line(
+                    df, x=x_col, y=y_cols[0] if y_cols else None, title=chart_title
+                )
+                chart_description = "Chart visualization of query results"
+
+            if fig is None:
+                result = PlotlyChartOutput(
+                    chart_type=chart_type,
+                    title="Error",
+                    description=f"Could not generate {chart_type} chart from the data",
+                    plotly_json={},
+                    data_path=data_path,
+                    status="error",
+                    is_error=True,
+                )
+                return result.model_dump_json()
+
+            # Update layout for better appearance
+            fig.update_layout(
+                template="plotly_white",
+                hovermode="x unified",
+                showlegend=True,
+            )
+
+            # Convert figure to JSON and handle numpy arrays
+            plotly_json = fig.to_dict()
+            plotly_json = convert_numpy_to_list(plotly_json)
+
+            result = PlotlyChartOutput(
+                chart_type=chart_type,
+                title=chart_title,
+                description=chart_description,
+                plotly_json=plotly_json,
+                data_path=data_path,
+                status="success",
+                is_error=False,
+            )
+            return result.model_dump_json()
+
+        except Exception as chart_error:
+            result = PlotlyChartOutput(
+                chart_type=chart_type,
+                title="Chart Generation Error",
+                description=f"Error creating {chart_type} chart: {repr(chart_error)}",
+                plotly_json={},
+                data_path=data_path,
+                status="error",
+                is_error=True,
+            )
+            return result.model_dump_json()
+
+    except ImportError:
+        result = PlotlyChartOutput(
+            chart_type=chart_type,
+            title="Import Error",
+            description="Plotly or pandas library is not installed. Please install with: pip install plotly pandas",
+            plotly_json={},
+            data_path=data_path if "data_path" in locals() else None,
+            status="error",
+            is_error=True,
+        )
+        return result.model_dump_json()
+    except Exception as e:
+        result = PlotlyChartOutput(
+            chart_type=chart_type,
+            title="Error",
+            description=f"Failed to generate chart: {repr(e)}",
+            plotly_json={},
+            data_path=data_path if "data_path" in locals() else None,
+            status="error",
+            is_error=True,
+        )
+        return result.model_dump_json()
