@@ -1329,7 +1329,7 @@ def generate_plotly_chart(
                                      ```
                                      import plotly.graph_objects as go
                                      from plotly.subplots import make_subplots
-                                     
+
                                      fig = make_subplots(specs=[[{"secondary_y": True}]])
                                      fig.add_trace(go.Scatter(x=df['DAY_KEY'], y=df['TOTAL_HITS'], name='Hits'), secondary_y=False)
                                      fig.add_trace(go.Scatter(x=df['DAY_KEY'], y=df['TOTAL_AMT'], name='Amount'), secondary_y=True)
@@ -1404,19 +1404,19 @@ def generate_plotly_chart(
                 try:
                     # Create a namespace with necessary imports and data
                     namespace = {
-                        'data': data,
-                        'df': df,
-                        'pd': pd,
-                        'px': px,
-                        'go': go,
-                        'make_subplots': make_subplots,
+                        "data": data,
+                        "df": df,
+                        "pd": pd,
+                        "px": px,
+                        "go": go,
+                        "make_subplots": make_subplots,
                     }
-                    
+
                     # Execute the custom code
                     exec(custom_code, namespace)
-                    
+
                     # Get the figure from the namespace
-                    if 'fig' not in namespace:
+                    if "fig" not in namespace:
                         return PlotlyChartOutput(
                             chart_type=chart_type,
                             title="Custom Code Error",
@@ -1426,10 +1426,10 @@ def generate_plotly_chart(
                             status="error",
                             is_error=True,
                         ).model_dump_json()
-                    
-                    fig = namespace['fig']
+
+                    fig = namespace["fig"]
                     chart_description = "Custom Plotly visualization"
-                    
+
                 except Exception as custom_error:
                     return PlotlyChartOutput(
                         chart_type=chart_type,
@@ -1440,7 +1440,7 @@ def generate_plotly_chart(
                         status="error",
                         is_error=True,
                     ).model_dump_json()
-            
+
             elif chart_type == "line":
                 if len(y_cols) == 1:
                     fig = px.line(df, x=x_col, y=y_cols[0], title=chart_title)
