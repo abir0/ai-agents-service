@@ -9,17 +9,19 @@ from schema.schema import (
     ChatHistory,
     ChatHistoryInput,
     ChatMessage,
+    DBSQLExecuteInput,
+    DBSQLExecuteOutput,
     Feedback,
     FeedbackResponse,
+    PostgresDBSearchInput,
+    PostgresDBSearchOutput,
     ServiceMetadata,
     StreamInput,
     UserInput,
-    PostgresDBSearchInput,
-    PostgresDBSearchOutput,
-    DBSQLExecuteInput,
-    DBSQLExecuteOutput,
     VectorDBSearchInput,
     VectorDBSearchOutput,
+    WeatherForecastOutput,
+    WeatherTrendOutput,
 )
 
 __all__ = [
@@ -42,4 +44,6 @@ __all__ = [
     "DBSQLExecuteOutput",
     "VectorDBSearchInput",
     "VectorDBSearchOutput",
+    "WeatherTrendOutput",
+    "WeatherForecastOutput",
 ]

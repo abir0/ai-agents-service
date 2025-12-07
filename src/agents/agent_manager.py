@@ -15,7 +15,9 @@ class Agent:
 
 
 agents: dict[str, Agent] = {
-    "data-analyst": Agent(description="Data analysis and viz agent.", graph=data_analyst),
+    "data-analyst": Agent(
+        description="Data analysis and viz agent.", graph=data_analyst
+    ),
 }
 
 
@@ -25,5 +27,6 @@ def get_agent(agent_id: str) -> CompiledStateGraph:
 
 def get_all_agent_info() -> list[AgentInfo]:
     return [
-        AgentInfo(key=agent_id, description=agent.description) for agent_id, agent in agents.items()
+        AgentInfo(key=agent_id, description=agent.description)
+        for agent_id, agent in agents.items()
     ]

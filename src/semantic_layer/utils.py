@@ -1,8 +1,9 @@
 import re
-import yaml
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict
+
+import yaml
 
 from semantic_layer.models import Configs
 from settings import settings

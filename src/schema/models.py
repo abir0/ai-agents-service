@@ -21,7 +21,4 @@ class FakeModelName(StrEnum):
     FAKE = "fake"
 
 
-AllModelEnum: TypeAlias = (
-    OpenAIModelName
-    | FakeModelName
-)
+AllModelEnum: TypeAlias = OpenAIModelName | FakeModelName

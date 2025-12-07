@@ -1,8 +1,8 @@
 import asyncio
 
 from agents import AgentClient
-from settings import settings
 from schema import ChatMessage
+from settings import settings
 
 
 # Async client mode
@@ -50,9 +50,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    print("="*60)
+    print("=" * 60)
     print("Running in sync mode")
     main()
-    print("="*60)
+    print("=" * 60)
     print("Running in async mode")
     asyncio.run(amain())

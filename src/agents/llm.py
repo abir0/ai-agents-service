@@ -17,9 +17,7 @@ _MODEL_TABLE = {
     OpenAIModelName.GPT_4O_MINI: "gpt-4o-mini",
 }
 
-ModelT: TypeAlias = (
-    ChatOpenAI | AzureChatOpenAI
-)
+ModelT: TypeAlias = ChatOpenAI | AzureChatOpenAI
 
 
 @cache
