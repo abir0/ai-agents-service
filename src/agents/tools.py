@@ -1026,16 +1026,21 @@ def get_weather_forecast(
 def visualize_geojson_map(
     location_type: str,
     location_names: Optional[List[str]] = None,
+    density_data_path: Optional[str] = None,
+    density_key_column: Optional[str] = None,
+    density_value_column: Optional[str] = None,
     output_filename: Optional[str] = None,
     center_lat: Optional[float] = None,
     center_lng: Optional[float] = None,
     zoom_start: int = 7,
+    colorscale: Optional[str] = "Blues",
 ) -> str:
     """Use this tool to load and visualize GeoJSON boundary data on an interactive map.
 
     This tool loads location hierarchy boundaries (Circle, Region, Cluster, or Territory)
     from GeoJSON files and creates an interactive Plotly map visualization with hover tooltips
-    showing location details. You can optionally filter to show only specific boundaries.
+    showing location details. You can optionally filter to show only specific boundaries or
+    create a density/choropleth map with color-coded gradients based on data values.
 
     Args:
         location_type (str): Type of location boundaries to visualize.
@@ -1043,11 +1048,25 @@ def visualize_geojson_map(
         location_names (Optional[List[str]]): List of specific location names to display.
                                              If None, displays all boundaries.
                                              Names are matched case-insensitively against GeoJSON properties.
+        density_data_path (Optional[str]): Path to JSON file containing density/value data for choropleth visualization.
+                                          The file should contain an array of objects with location names and values.
+                                          Example file content: [{"location": "DHAKA CIRCLE", "revenue": 150000}, ...]
+                                          When provided, creates a color-gradient map where regions are colored
+                                          based on the values (lighter for lower values, darker for higher values).
+                                          If density_data_path is provided, location_names is ignored.
+        density_key_column (Optional[str]): Column name in the density data that contains location names.
+                                           Example: "location", "circle_name", "region_name"
+                                           Required if density_data_path is provided.
+        density_value_column (Optional[str]): Column name in the density data that contains the numeric values.
+                                             Example: "revenue", "sales", "population", "count"
+                                             Required if density_data_path is provided.
         output_filename (Optional[str]): Custom name for the output HTML map file (without extension).
                                         If not provided, auto-generates based on location type and timestamp.
         center_lat (Optional[float]): Latitude for map center. If None, auto-calculates from boundaries.
         center_lng (Optional[float]): Longitude for map center. If None, auto-calculates from boundaries.
         zoom_start (int): Initial zoom level (default: 7)
+        colorscale (Optional[str]): Color scale for density map. Options: "Blues", "Reds", "Greens", "Viridis",
+                                   "Plasma", "YlOrRd", "RdYlGn", etc. Default: "Blues"
 
     Returns:
         str: JSON string containing the Plotly figure for rendering in the UI.
@@ -1095,8 +1114,102 @@ def visualize_geojson_map(
                 {"error": "No features found in GeoJSON file", "status": "error"}
             )
 
-        # Filter features if location_names provided
-        if location_names:
+        # Load density data from file if provided
+        density_data = None
+        if density_data_path:
+            if not density_key_column or not density_value_column:
+                return json.dumps(
+                    {
+                        "error": "Both density_key_column and density_value_column are required when density_data_path is provided",
+                        "status": "error",
+                    }
+                )
+
+            if not Path(density_data_path).exists():
+                return json.dumps(
+                    {
+                        "error": f"Density data file not found: {density_data_path}",
+                        "status": "error",
+                    }
+                )
+
+            try:
+                with open(density_data_path, "r", encoding="utf-8") as f:
+                    density_data_array = json.load(f)
+
+                if not isinstance(density_data_array, list):
+                    return json.dumps(
+                        {
+                            "error": "Density data file must contain a JSON array of objects",
+                            "status": "error",
+                        }
+                    )
+
+                # Convert array to dictionary
+                density_data = {}
+                for item in density_data_array:
+                    if not isinstance(item, dict):
+                        continue
+                    key = item.get(density_key_column)
+                    value = item.get(density_value_column)
+                    if key and value is not None:
+                        try:
+                            density_data[str(key)] = float(value)
+                        except (ValueError, TypeError):
+                            continue
+
+                if not density_data:
+                    return json.dumps(
+                        {
+                            "error": f"No valid data found in file. Please ensure the file contains objects with '{density_key_column}' and '{density_value_column}' fields",
+                            "status": "error",
+                        }
+                    )
+
+            except json.JSONDecodeError as e:
+                return json.dumps(
+                    {
+                        "error": f"Failed to parse density data file. Error: {repr(e)}",
+                        "status": "error",
+                    }
+                )
+
+        # Determine if we're creating a density map
+        is_density_map = density_data is not None and len(density_data) > 0
+
+        # Filter features based on density_data or location_names
+        if is_density_map:
+            # Normalize density data keys for case-insensitive matching
+            density_data_lower = {k.lower(): v for k, v in density_data.items()}
+            filtered_features = []
+            density_values = []
+
+            for feature in all_features:
+                properties = feature.get("properties", {})
+                # Check all property values for matches in density_data
+                for prop_value in properties.values():
+                    if isinstance(prop_value, str):
+                        prop_lower = prop_value.lower()
+                        if prop_lower in density_data_lower:
+                            filtered_features.append(feature)
+                            density_values.append(density_data_lower[prop_lower])
+                            break
+
+            if not filtered_features:
+                return json.dumps(
+                    {
+                        "error": f"No boundaries found matching density_data keys: {', '.join(density_data.keys())}",
+                        "status": "error",
+                        "available_locations": [
+                            feature.get("properties", {}).get("name", "Unknown")
+                            for feature in all_features[:10]
+                        ],
+                    }
+                )
+
+            features = filtered_features
+
+        elif location_names:
             # Normalize location names for case-insensitive matching
             location_names_lower = [name.lower() for name in location_names]
             filtered_features = []
@@ -1129,6 +1242,7 @@ def visualize_geojson_map(
             features = filtered_features
         else:
             features = all_features
+            density_values = None
 
         # Prepare hover text and IDs for each feature FIRST
         hover_texts = []
@@ -1136,10 +1250,15 @@ def visualize_geojson_map(
 
         for idx, feature in enumerate(features):
             properties = feature.get("properties", {})
-            hover_text = f"<b>{location_type.title()}</b><br>"
+            hover_text = f"<b>{location_type.title()}<br>"
             for key, value in properties.items():
                 if key != "_index":  # Skip internal index property
                     hover_text += f"{key}: {value}<br>"
+
+            # Add density value to hover text if available
+            if is_density_map and idx < len(density_values):
+                hover_text += f"<b>Value: {density_values[idx]:,.2f}<br>"
+
             hover_texts.append(hover_text.rstrip("<br>"))
 
             # Add index-based ID to feature properties for mapping
@@ -1196,26 +1315,55 @@ def visualize_geojson_map(
                 center_lng = 90.4125
 
         # Create the Plotly choropleth map
-        fig = go.Figure(
-            go.Choroplethmapbox(
-                geojson=geojson_data,
-                locations=feature_ids,
-                z=list(range(len(features))),  # Different values for each feature
-                featureidkey="properties._index",
-                text=hover_texts,
-                hovertemplate="%{text}<extra></extra>",
-                colorscale=[[0, "lightblue"], [1, "blue"]],
-                showscale=False,
-                marker=dict(opacity=0.6, line=dict(color="darkblue", width=2)),
+        if is_density_map:
+            # Create density/choropleth map with gradient colors
+            fig = go.Figure(
+                go.Choroplethmapbox(
+                    geojson=geojson_data,
+                    locations=feature_ids,
+                    z=density_values,
+                    featureidkey="properties._index",
+                    text=hover_texts,
+                    hovertemplate="%{text}<extra></extra>",
+                    colorscale=colorscale,
+                    showscale=True,
+                    colorbar=dict(
+                        title=dict(text="Value", side="right"),
+                        thickness=15,
+                        len=0.7,
+                    ),
+                    marker=dict(opacity=0.7, line=dict(color="white", width=1)),
+                )
             )
-        )
+        else:
+            # Create standard boundary map with uniform colors
+            fig = go.Figure(
+                go.Choroplethmapbox(
+                    geojson=geojson_data,
+                    locations=feature_ids,
+                    z=list(range(len(features))),  # Different values for each feature
+                    featureidkey="properties._index",
+                    text=hover_texts,
+                    hovertemplate="%{text}<extra></extra>",
+                    colorscale=[[0, "lightblue"], [1, "blue"]],
+                    showscale=False,
+                    marker=dict(opacity=0.6, line=dict(color="darkblue", width=2)),
+                )
+            )
 
         # Update map layout
-        map_title = f"{location_type.title()} Boundaries Map"
+        if is_density_map:
+            map_title = f"{location_type.title()} Density Map"
+        else:
+            map_title = f"{location_type.title()} Boundaries Map"
+
+        # Choose map style based on whether it's a density map
+        # Use lighter/grayish style for density maps to create better contrast
+        map_style = "carto-positron" if is_density_map else "open-street-map"
 
         fig.update_layout(
             mapbox=dict(
-                style="open-street-map",
+                style=map_style,
                 center=dict(lat=center_lat, lon=center_lng),
                 zoom=zoom_start,
             ),
@@ -1243,14 +1391,26 @@ def visualize_geojson_map(
             json.dump(plotly_json, f, indent=2)
 
         # Build description
-        description = f"Interactive map showing {len(features)} {location_type} "
-        if location_names:
-            if len(features) == 1:
-                description += f"boundary: {location_names[0]}"
-            else:
-                description += f"boundaries (filtered from {len(all_features)} total)"
+        if is_density_map:
+            min_val = min(density_values) if density_values else 0
+            max_val = max(density_values) if density_values else 0
+            avg_val = sum(density_values) / len(density_values) if density_values else 0
+            description = (
+                f"Density map showing {len(features)} {location_type} boundaries "
+                f"with color gradient based on data values. "
+                f"Range: {min_val:,.2f} - {max_val:,.2f} (avg: {avg_val:,.2f})"
+            )
         else:
-            description += "boundaries"
+            description = f"Interactive map showing {len(features)} {location_type} "
+            if location_names:
+                if len(features) == 1:
+                    description += f"boundary: {location_names[0]}"
+                else:
+                    description += (
+                        f"boundaries (filtered from {len(all_features)} total)"
+                    )
+            else:
+                description += "boundaries"
 
         # Return the result as JSON string
         result = {
@@ -1261,7 +1421,21 @@ def visualize_geojson_map(
             "data_path": output_path,
             "feature_count": len(features),
             "total_features": len(all_features),
-            "filtered": location_names is not None,
+            "filtered": location_names is not None or is_density_map,
+            "is_density_map": is_density_map,
+            "density_stats": {
+                "min": min(density_values)
+                if is_density_map and density_values
+                else None,
+                "max": max(density_values)
+                if is_density_map and density_values
+                else None,
+                "avg": sum(density_values) / len(density_values)
+                if is_density_map and density_values
+                else None,
+            }
+            if is_density_map
+            else None,
             "status": "success",
             "is_error": False,
         }
